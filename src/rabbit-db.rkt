@@ -1,26 +1,23 @@
 (module rabbit-db racket
-  (require (planet jaymccarthy/sqlite:5:1/sqlite))
+  (require (planet jaymccarthy/sqlite:5:1/sqlite)
+           
+           "rabbit-common.rkt")
   
   (provide open-db
            close-db
            
-           get-category-id
-           get-category-id/new
+           insert-category
            update-category
            delete-category
+           select-category-id
            
-           create-task
-           update-task-category
-           update-task-start
-           update-task-stop
+           insert-task
+           update-task
            delete-task
-           
-           get-task-id/start
-           get-task-id/stop
-           get-task
-           get-tasks
-           get-tasks/category
-           (struct-out task))
+           select-task-id
+           select-task-ids
+           select-task
+           select-tasks)
   
   (define CREATE_CATEGORIES "create table if not exists categories (category_id INTEGER PRIMARY KEY, name TEXT);")
   (define CREATE_TASKS "create table if not exists tasks (task_id INTEGER PRIMARY KEY, category_id INTEGER SECONDARY KEY, start INTEGER, stop INTEGER);")
@@ -28,7 +25,7 @@
   ; Initializes the database by creating both the
   ; categories and tasks table if needed.
   ;
-  ; string? -> or db? #f
+  ; string? -> (or db? #f)
   (define (open-db db-string)
     (let ((db (open (string->path db-string))))
       (if (db? db)
@@ -46,15 +43,32 @@
   
   (define INSERT_CATEGORY "insert into categories (name) values (?);")
   
-  ; Returns the category id for the given category name.
-  ; Creates a new one if needed.
+  ; Creates an entry in the categories table with the
+  ; given string in upper case.  Returns the identifier
+  ; given to the entry.
   ;
   ; db? string? -> exact-integer?
-  (define (get-category-id/new db category)
-    (let ((category-id (get-category-id db category)))
-      (if (= category-id -1)
-          (insert db INSERT_CATEGORY category)
-          category-id)))
+  (define (insert-category db category)
+    (insert db INSERT_CATEGORY (string-upcase category)))
+  
+  (define UPDATE_CATEGORY "update categories SET name = ? where category_id = ?;")
+  
+  ; Updates the given category id with the new category name.
+  ;
+  ; db? exact-integer? string? -> boolean?
+  (define (update-category db cid category-new)
+    (exec/ignore db UPDATE_CATEGORY (string-upcase category-new) cid)
+    (= (changes-count db) 1))
+  
+  (define DELETE_CATEGORY "delete from categories where category_id=?;")
+  
+  ; Removes the category from the database.  Note that this can
+  ; be dangerous because a task may reference this category id.!
+  ;
+  ; db? string? -> boolean?
+  (define (delete-category db cid)
+    (exec/ignore db DELETE_CATEGORY cid)
+    (= (changes-count db) 1))
   
   (define SELECT_CATEGORY "select category_id from categories where name=?")
   
@@ -62,189 +76,171 @@
   ; or -1 when it doesn't exist.
   ;
   ; db? string? -> exact-integer?
-  (define (get-category-id db category)
-    (let ((data (select db SELECT_CATEGORY category)))
+  (define (select-category-id db category)
+    (let ((data (select db SELECT_CATEGORY (string-upcase category))))
       (if (empty? data)
           -1
           (vector-ref (second data) 0))))
   
-  (define UPDATE_CATEGORY "update categories SET name = ? where category_id = ?;")
-  
-  ; Updates the given category name to the new category name.
-  ;
-  ; db? string? string? -> boolean?
-  (define (update-category db category-old category-new)
-    (let ((category-id (get-category-id db category-old)))
-      (if (= category-id -1)
-          #f
-          (begin
-            (exec/ignore db UPDATE_CATEGORY category-new category-id)
-            (= (changes-count db) 1)))))
-  
-  (define SEARCH_TASK_CATEGORY "select count(category_id) from tasks where category_id=?;")
-  (define DELETE_CATEGORY "delete from categories where category_id=?;")
-  
-  ; Removes the category from the database.  This will only
-  ; be allowed when there are no tasks referencing this category.
-  ;
-  ; db? string? -> boolean?
-  (define (delete-category db category)
-    (let ((category-id (get-category-id db category)))
-      (if (= category-id -1)
-          #f
-          (let ((num-rows 0))
-            (exec db SEARCH_TASK_CATEGORY
-                  (lambda (names values)
-                    (set! num-rows (vector-ref values 0))
-                    0)
-                  category-id)
-            (if (= num-rows 0)
-                (begin
-                  (exec/ignore db DELETE_CATEGORY category-id)
-                  (= (changes-count db) 1))
-                #f)))))
-  
   (define INSERT_TASK "insert into tasks (category_id, start, stop) values (?,?,?);")
   
   ; Inserts a new entry into the tasks table using
-  ; the given category (creating the category if needed)
-  ; and using the current timestamp.
+  ; the given category id, start timestamp and stop timestamp.
+  ; Returns the task identifier for the new entry.
   ;
-  ; db? string? exact-integer? exact-integer? -> exact-integer?
-  (define (create-task db category [start (current-milliseconds)] [stop 0])
-    (let ((category-id (get-category-id/new db category)))
-      (insert db INSERT_TASK category-id start stop)))
+  ; db? exact-integer? exact-integer? exact-integer? -> exact-integer?
+  (define (insert-task db cid start stop)
+    (insert db INSERT_TASK cid start stop))
   
   (define UPDATE_TASK_CATEGORY "update tasks set category_id = ? where task_id = ?;")
-  
-  ; Updates the category for the given task id.  Creates
-  ; a new category if needed.
-  ;
-  ; db? exact-integer? string? -> boolean?
-  (define (update-task-category db task-id category)
-    (let ((category-id (get-category-id/new db category)))
-      (exec/ignore db UPDATE_TASK_CATEGORY category-id task-id)
-      (= (changes-count db) 1)))
-  
   (define UPDATE_TASK_START "update tasks set start = ? where task_id = ?;")
-  
-  ; Updates the start time for the given task id.
-  ;
-  ; db? exact-integer? exact-integer? -> boolean?
-  (define (update-task-start db task-id [start (current-milliseconds)])
-    (exec/ignore db UPDATE_TASK_START start task-id)
-    (= (changes-count db) 1))
-  
   (define UPDATE_TASK_STOP "update tasks set stop = ? where task_id = ?;")
   
-  ; Updates the stop time for the given task id.
+  ; Updates the given values for the given task id.  Returns true when all three
+  ; updates are taken, false otherwise.
   ;
-  ; db? exact-integer? exact-integer? -> boolean?
-  (define (update-task-stop db task-id [stop (current-milliseconds)])
-    (exec/ignore db UPDATE_TASK_STOP stop task-id)
-    (= (changes-count db) 1))
+  ; db? exact-integer? exact-integer? exact-integer? exact-integer? -> boolean?
+  (define (update-task db
+                       tid
+                       #:cid [cid #f]
+                       #:start [start #f]
+                       #:stop [stop #f])
+    (let ((start-changes (total-changes-count db))
+          (num-changes (+ 
+                        (if (boolean? cid) 0 1)
+                        (if (boolean? start) 0 1)
+                        (if (boolean? stop) 0 1))))
+      (unless (boolean? cid)
+        (exec/ignore db UPDATE_TASK_CATEGORY cid tid))
+      (unless (boolean? start)
+        (exec/ignore db UPDATE_TASK_START start tid))
+      (unless (boolean? stop)
+        (exec/ignore db UPDATE_TASK_STOP stop tid))
+      (= (total-changes-count db) (+ start-changes num-changes))))
   
   (define DELETE_TASK "delete from tasks where task_id=?;")
   
   ; Removes the task from the database.
   ;
   ; db? exact-integer? -> boolean?
-  (define (delete-task db task-id)
-    (exec/ignore db DELETE_TASK task-id)
+  (define (delete-task db tid)
+    (exec/ignore db DELETE_TASK tid)
     (= (changes-count db) 1))
   
-  ; The task structure
-  ;
-  ; task-id : exact-integer?
-  ; category-id : exact-integer?
-  ; category-name : string?
-  ; start : exact-integer?
-  ; stop : exact-integer?
-  ; category-created : exact-integer?
-  (struct task (task-id category-id start stop category-name)
-    #:transparent)
+  (define SELECT_TASK_ID "select task_id from tasks where ")
   
-  (define SELECT_TASK "select distinct * from tasks natural join categories where task_id=?;")
-  
-  ; Returns the task associated with the given task id.
+  ; Returns the task id associated with the given category id,
+  ; start time and stop time.  The values default to '*' in the
+  ; query and if more then one result is returned only the first
+  ; task id will be returned.  Returns a value of -1 when the task id
+  ; cannot be found.
   ;
-  ; db? exact-integer? -> or task? boolean?
-  (define (get-task db task-id)
-    (let ((data (select db SELECT_TASK task-id)))
+  ; db? exact-integer? exact-integer? exact-integer? -> exact-integer?
+  (define (select-task-id db
+                       #:cid [cid #f]
+                       #:start [start #f]
+                       #:stop [stop #f])
+    (let ((data (select db (generate-query SELECT_TASK_ID #f cid start stop))))
       (if (empty? data)
-          #f
-          (let ((td (second data)))
-            (task (vector-ref td 0)
-                  (vector-ref td 1)
-                  (vector-ref td 2)
-                  (vector-ref td 3)
-                  (vector-ref td 4))))))
-  
-  (define SEARCH_TASK_START "select task_id from tasks where category_id=? and start=?;")
-  
-  ; Returns the task id associated with the given category and start time.
-  ;
-  ; db? string? exact-integer? -> exact-integer?
-  (define (get-task-id/start db category start)
-    (let ((category-id (get-category-id db category)))
-      (if (= category-id -1)
           -1
-          (let ((data (select db SEARCH_TASK_START category-id start)))
-            (if (empty? data)
-                -1
-                (vector-ref (second data) 0))))))
+          (vector-ref (second data) 0))))
   
-  (define SEARCH_TASK_STOP "select task_id from tasks where category_id=? and stop=?;")
-  
-  ; Returns the task id associated with the given category and stop time.
+  ; Returns the task ids associated with the given category id,
+  ; start time and stop time.  The values default to '*' in the
+  ; query and this function will always return a list.
   ;
-  ; db? string? exact-integer? -> exact-integer?
-  (define (get-task-id/stop db category stop)
-    (let ((category-id (get-category-id db category)))
-      (if (= category-id -1)
-          -1
-          (let ((data (select db SEARCH_TASK_STOP category-id stop)))
-            (if (empty? data)
-                -1
-                (vector-ref (second data) 0))))))
-  
-  (define SELECT_TASKS "select distinct * from tasks natural join categories where category_id=? and start >= ? and stop <= ?;")
-  
-  ; Returns the tasks associated with the given category that lie between
-  ; the indicated start and stop times.
-  ;
-  ; db? string? exact-integer? exact-integer? -> or listof task? boolean?
-  (define (get-tasks/category db category [start 0] [stop (current-milliseconds)])
-    (let ((category-id (get-category-id db category)))
-      (if (= category-id -1)
+  ; db? exact-integer? exact-integer? exact-integer? -> listof exact-integer?
+  (define (select-task-ids db
+                        #:cid [cid #f]
+                        #:start [start #f]
+                        #:stop [stop #f])
+    (let ((data (select db (generate-query SELECT_TASK_ID #f cid start stop))))
+      (if (empty? data)
           '()
-          (let ((data (select db SELECT_TASKS category-id start stop)))
-            (if (empty? data)
-                '()
-                (let ((create-task 
-                       (lambda (td)
-                         (task (vector-ref td 0)
-                               (vector-ref td 1)
-                               (vector-ref td 2)
-                               (vector-ref td 3)
-                               (vector-ref td 4)))))
-                  (map create-task (rest data))))))))
-  
-  (define SELECT_ALL_TASKS "select distinct * from tasks natural join categories where start >= ? and stop <= ?;")
-  
-  ; Returns the tasks that lie between the indicated start and stop times.
+          (flatten (map vector->list (rest data))))))
+    
+  (define SELECT_TASK "select distinct task_id, category_id, name, start, stop from tasks natural join categories where ")
+     
+  ; Returns the task found with the given parameters.
   ;
-  ; db? exact-integer? exact-integer? -> or listof task? boolean?
-  (define (get-tasks db [start 0] [stop (current-milliseconds)])
-    (let ((data (select db SELECT_ALL_TASKS start stop)))
-            (if (empty? data)
-                '()
-                (let ((create-task 
-                       (lambda (td)
-                         (task (vector-ref td 0)
-                               (vector-ref td 1)
-                               (vector-ref td 2)
-                               (vector-ref td 3)
-                               (vector-ref td 4)))))
-                  (map create-task (rest data))))))
+  ; db? exact-integer? exact-integer? exact-integer? exact-integer? -> or task? boolean?
+  (define (select-task db
+                       #:tid [tid #f]
+                       #:cid [cid #f]
+                       #:start [start #f]
+                       #:stop [stop #f])
+    (if (and (boolean? tid)
+             (boolean? cid)
+             (boolean? start)
+             (boolean? stop))
+        #f
+        (let* ((data (select db (generate-query SELECT_TASK tid cid start stop))))
+          (if (empty? data)
+              #f
+              (let ((td (second data)))
+                (task (vector-ref td 0)
+                      (vector-ref td 1)
+                      (vector-ref td 2)
+                      (vector-ref td 3)
+                      (vector-ref td 4)))))))
+  
+  (define SELECT_TASKS "select distinct task_id, category_id, name, start, stop from tasks natural join categories where start>=? and stop<=?")
+  
+  ; Returns the tasks associated with the given category id
+  ; and that lie between the start and stop times given.
+  ;
+  ; db? exact-integer? exact-integer? exact-integer? -> listof task?
+  (define (select-tasks db start stop #:cid [cid #f])
+    (let* ((query (if (boolean? cid)
+                      (string-append SELECT_TASKS ";")
+                      (string-append SELECT_TASKS " and category_id='" (number->string cid) "';")))
+           (data (select db query start stop)))
+      (if (empty? data)
+          '()
+          (map (lambda (row)
+                 (task (vector-ref row 0)
+                       (vector-ref row 1)
+                       (vector-ref row 2)
+                       (vector-ref row 3)
+                       (vector-ref row 4)))
+               (rest data)))))
+  
+  ; Generates an sql query string by appending the given values when
+  ; they are not boolean's to the given query string.  The values
+  ; are separated by and's when necessary and completed with a ';'.
+  ;
+  ; string? string? string? string? string? -> string?
+  (define (generate-query query
+                          tid
+                          cid
+                          start
+                          stop)
+    (let* ((tid-str (if
+                     (boolean? tid)
+                     #f
+                     (string-append "task_id='" (number->string tid) "'")))
+           (cid-str (if
+                     (boolean? cid)
+                     #f
+                     (string-append "category_id='" (number->string cid) "'")))
+           (start-str (if
+                       (boolean? start)
+                       #f
+                       (string-append "start='" (number->string start) "'")))
+           (stop-str (if
+                      (boolean? stop)
+                      #f
+                      (string-append "stop='" (number->string stop) "'")))
+           (str (foldl (lambda (str result)
+                         (if (boolean? str)
+                             result
+                             (let ((last (- (string-length result) 1)))
+                               (if (and (> last 0)
+                                        (string=? (substring result last)
+                                                  "'"))
+                                   (string-append result " and " str)
+                                   (string-append result str)))))
+                       query
+                       (list tid-str cid-str start-str stop-str))))
+      (string-append str ";")))
   )

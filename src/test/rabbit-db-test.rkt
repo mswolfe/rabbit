@@ -1,6 +1,8 @@
 #lang racket
 (require rackunit
          (planet jaymccarthy/sqlite:5:1/sqlite)
+         
+         "../rabbit-common.rkt"
          "../rabbit-db.rkt")
 
 (provide rabbit-db-tests)
@@ -28,32 +30,25 @@
    (test-case
     "Category"
     (let ((db (open-db test-db)))
-      (check-equal? (get-category-id db "work") -1)
+      ; Check insertion
+      (check-equal? (insert-category db "work") 1)
+      (check-equal? (insert-category db "play") 2)
+      (check-equal? (insert-category db "chores") 3)
       
-      (check-equal? (get-category-id/new db "work") 1)
-      (check-equal? (get-category-id db "work") 1)
+      ; Check selection
+      (check-equal? (select-category-id db "work") 1)
+      (check-equal? (select-category-id db "play") 2)
+      (check-equal? (select-category-id db "chores") 3)
       
-      (check-equal? (get-category-id/new db "play") 2)
-      (check-equal? (get-category-id db "play") 2)
+      ; Check updating
+      (check-true (update-category db 1 "work2"))
+      (check-equal? (select-category-id db "work") -1)
+      (check-equal? (select-category-id db "work2") 1)
       
-      (check-equal? (get-category-id db "bad") -1)
-      
-      (check-false (update-category db "bad" "false"))
-      
-      (check-true (update-category db "work" "work2"))
-      (check-true (update-category db "work2" "work3"))
-      (check-equal? (get-category-id db "work3") 1)
-      
-      (check-false (update-category db "work" "false"))
-      (check-false (update-category db "work2" "false"))
-      
-      (check-false (delete-category db "false"))
-      
-      (check-true (delete-category db "play"))
-      (check-false (delete-category db "play"))
-      
-      (exec/ignore db "insert into tasks (category_id,start,stop) values (1,5,10);")
-      (check-false (delete-category db "work3"))
+      ; Check deletion
+      (check-true (delete-category db 1))
+      (check-equal? (select-category-id db "work") -1)
+      (check-equal? (select-category-id db "work2") -1)
       
       (close-db db)
       (clean)))
@@ -61,45 +56,97 @@
    (test-case
     "Task"
     (let ((db (open-db test-db)))
-      (check-equal? (create-task db "work") 1)
+      (check-equal? (insert-category db "work") 1)
+      (check-equal? (insert-category db "play") 2)
+      (check-equal? (insert-category db "chores") 3)
       
-      (check-false (update-task-category db 5 "play"))
-      (check-true (update-task-category db 1 "play"))
+      ; Check insertion
+      (check-equal? (insert-task db 1 1000 2000) 1)
+      (check-equal? (insert-task db 2 2000 3000) 2)
       
-      (check-false (update-task-start db 5 10))
-      (check-true (update-task-start db 1 10))
+      ; Check updating
+      (check-true (update-task db 1 #:cid 2))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-cid t) 2))))
       
-      (check-false (update-task-stop db 5 20))
-      (check-true (update-task-stop db 1 20))
+      (check-true (update-task db 1 #:start 5000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-start t) 5000))))
       
-      (check-false (get-task db 5))
-      (check-equal? (get-task db 1)
-                    (task 1 2 10 20 "play"))
+      (check-true (update-task db 1 #:stop 6000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-stop t) 6000))))
       
-      (check-equal? (create-task db "work") 2)
-      (check-equal? (create-task db "work") 3)
-      (check-equal? (create-task db "play") 4)
-      (check-equal? (create-task db "play") 5)
+      (check-true (update-task db 1 #:cid 3 #:start 4000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-cid t) 3)
+                         (= (task-start t) 4000))))
       
-      (check-equal? (length (get-tasks/category db "work")) 2)
-      (check-equal? (length (get-tasks/category db "play")) 3)
-      (check-true (empty? (get-tasks/category db "false")))
+      (check-true (update-task db 1 #:cid 2 #:stop 7000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-cid t) 2)
+                         (= (task-stop t) 7000))))
       
-      (check-equal? (get-task-id/start db "false" 5) -1)
-      (check-equal? (get-task-id/start db "play" 5) -1)
-      (check-equal? (get-task-id/start db "play" 10) 1)
+      (check-true (update-task db 1 #:start 3000 #:stop 8000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-start t) 3000)
+                         (= (task-stop t) 8000))))
       
-      (check-equal? (get-task-id/stop db "false" 5) -1)
-      (check-equal? (get-task-id/stop db "play" 5) -1)
-      (check-equal? (get-task-id/stop db "play" 20) 1)
+      (check-true (update-task db 1 #:cid 1 #:start 1000 #:stop 2000))
+      (check-true (let ((t (select-task db #:tid 1)))
+                    (and (task? t)
+                         (= (task-cid t) 1)
+                         (= (task-start t) 1000)
+                         (= (task-stop t) 2000))))
       
-      
-      (check-false (delete-task db 55))
+      ; Check Deletion
       (check-true (delete-task db 2))
-      (check-true (delete-task db 4))
+      (check-false (select-task db #:tid 2))
       
-      (check-equal? (length (get-tasks/category db "work")) 1)
-      (check-equal? (length (get-tasks/category db "play")) 2)
+      ; Check select-task-id
+      (check-equal? (insert-task db 1 4000 5000) 2)
+      (check-equal? (insert-task db 2 6000 7000) 3)
+      
+      (check-equal? (select-task-id db #:cid 1) 1)
+      (check-equal? (select-task-id db #:start 4000) 2)
+      (check-equal? (select-task-id db #:stop 5000) 2)
+      (check-equal? (select-task-id db #:cid 1 #:start 4000) 2)
+      (check-equal? (select-task-id db #:cid 1 #:stop 5000) 2)
+      (check-equal? (select-task-id db #:start 4000 #:stop 5000) 2)
+      (check-equal? (select-task-id db #:cid 1 #:start 4000 #:stop 5000) 2)
+      
+      (check-equal? (select-task-id db #:cid 8) -1)
+      (check-equal? (select-task-id db #:start 10000) -1)
+      (check-equal? (select-task-id db #:stop 5) -1)
+      
+      ; Check select-task-ids
+      (check-equal? (select-task-ids db #:cid 1)
+                    (list 1 2))
+      (check-equal? (select-task-ids db #:cid 2)
+                    (list 3))
+      
+      ; Check select-task
+      (check-equal? (select-task db #:tid 3)
+                    (task 3 2 "PLAY" 6000 7000))
+      (check-equal? (select-task db #:cid 2 #:start 6000)
+                    (task 3 2 "PLAY" 6000 7000))
+      
+      ; Check select-tasks
+      (check-equal? (select-tasks db 4000 7000)
+                    (list
+                     (task 2 1 "WORK" 4000 5000)
+                     (task 3 2 "PLAY" 6000 7000)))
+      
+      (check-equal? (select-tasks db 500 6000 #:cid 1)
+                    (list
+                     (task 1 1 "WORK" 1000 2000)
+                     (task 2 1 "WORK" 4000 5000)))
       
       (close-db db)
       (clean)))
