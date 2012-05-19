@@ -1,11 +1,29 @@
 (module rabbit-common racket
   
+  ; Requires
+  (require racket/date
+           racket/match)
+  
   ; Provides
   (provide (struct-out task)
-           task-total)
+           task-total
+           
+           (struct-out category)
+           (struct-out total)
+           
+           time->date/string
+           time->hours/string)
   
   ; The task structure.
   (struct task (tid cid name start stop)
+    #:transparent)
+  
+  ; The category structure.
+  (struct category (cid name)
+    #:transparent)
+  
+  ; The total structure.
+  (struct total (cid name time)
     #:transparent)
   
   ; Returns the total amount of time that the task
@@ -20,4 +38,21 @@
           (- (current-milliseconds) (task-start t))
           (- stop (task-start t)))))
   
+  ; Returns a string formatted date given the time in milliseconds.
+  ;
+  ; exact-integer? -> string?
+  (define (time->date/string ms)
+    (if (= ms 0)
+        ""
+        (date->string (seconds->date (/ ms 1000)) #t)))
+  
+  ; Returns a string formatted date given the time in milliseconds.
+  ;
+  ; exact-integer? -> string?
+  (define (time->hours/string ms)
+    (let ((str (number->string (exact->inexact (/ ms 1000 60 60)))))
+      (string-append
+        ;(list->string (remove* (member #\. (string->list str)) (string->list str)))
+        str
+        " hrs")))
   )

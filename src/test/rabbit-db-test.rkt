@@ -39,6 +39,10 @@
       (check-equal? (select-category-id db "work") 1)
       (check-equal? (select-category-id db "play") 2)
       (check-equal? (select-category-id db "chores") 3)
+      (check-equal? (select-categories db)
+                    (list (category 1 "WORK")
+                          (category 2 "PLAY")
+                          (category 3 "CHORES")))
       
       ; Check updating
       (check-true (update-category db 1 "work2"))
@@ -138,15 +142,31 @@
                     (task 3 2 "PLAY" 6000 7000))
       
       ; Check select-tasks
-      (check-equal? (select-tasks db 4000 7000)
+      (check-equal? (select-tasks-range db 4000 7000)
                     (list
                      (task 2 1 "WORK" 4000 5000)
                      (task 3 2 "PLAY" 6000 7000)))
       
-      (check-equal? (select-tasks db 500 6000 #:cid 1)
+      (check-equal? (select-tasks-range db 500 6000 #:cid 1)
                     (list
                      (task 1 1 "WORK" 1000 2000)
                      (task 2 1 "WORK" 4000 5000)))
+      
+      ; Check update-task/stop
+      (check-equal? (insert-task db 1 10000 0) 4)
+      (check-equal? (insert-task db 2 20000 0) 5)
+      
+      (check-true (update-task/stop db 0 55))
+      (check-equal? (task-stop (select-task db #:tid 4))
+                    55)
+      (check-equal? (task-stop (select-task db #:tid 5))
+                    55)
+      
+      (check-true (update-task/stop db 55 88 #:cid 1))
+      (check-equal? (task-stop (select-task db #:tid 4))
+                    88)
+      (check-equal? (task-stop (select-task db #:tid 5))
+                    55)
       
       (close-db db)
       (clean)))
