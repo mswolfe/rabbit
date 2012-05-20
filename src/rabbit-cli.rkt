@@ -1,10 +1,12 @@
 #lang racket
-(require "rabbit-common.rkt"
+(require racket/date
+  
+         "rabbit-common.rkt"
          "rabbit.rkt"
          "rabbit-db.rkt")
 
 ; TODO: Make this path configurable.
-(define DB_PATH "rabbit.db")
+(define db-path (make-parameter #f))
 
 ; Command line options.
 (define add-c (make-parameter #f))
@@ -24,6 +26,9 @@
 ; Parse the command line.
 (command-line
  #:program "rabbit"
+ #:once-each
+ [("--database") filename "Sets the database path that rabbit uses."
+                 (db-path filename)]
  #:once-any
  [("--add-category") category
                      "Creates a category"
@@ -60,8 +65,23 @@
                                       [else day]))]
  )
 
+(unless (path-string? (db-path))
+  (printf "You must provide the database path with --database <filename>~n")
+  (exit 1))
+
 ; Past the command line parser, let's setup the db.
-(define db (open-db DB_PATH))
+(define db (open-db (db-path)))
+
+; Setup the date display formatting.
+(date-display-format 'iso-8601)
+
+; Returns a string with the given number of bars.
+;
+; exact-integer? -> string?
+(define (print-bars num-bars [result ""])
+  (if (<= num-bars 0)
+      result
+      (print-bars (sub1 num-bars) (string-append result "="))))
 
 ; Add category
 (when (string? (add-c))
@@ -121,26 +141,41 @@
 
 ; List all tasks.
 (when (procedure? (list-ttotals))
-  (printf "id\tcategory\tstart\tstop\ttotal~n")
-  (printf "------------------------------------------------~n")
-  (for-each (lambda (t)
-             (printf "~s\t~s\t~s\t~s\t~s~n"
-                     (number->string (task-tid t))
-                     (task-name t)
-                     (time->date/string (task-start t))
-                     (time->date/string (task-stop t))
-                     (time->hours/string (task-total t))))
-    (list-tasks db (list-ttotals) (current-milliseconds))))
+  (let* ((tasks (list-tasks db (list-ttotals) (current-milliseconds)))
+          (total-time (foldl (lambda (t result)
+                              (+ result (task-total t)))
+                             0
+                             tasks)))
+    (for-each (lambda (t)
+               (printf "[~a] ~a (~a - ~a) ~a~n"
+                       (number->string (task-tid t))
+                       (task-name t)
+                       (time->date/string (task-start t))
+                       (time->date/string (task-stop t))
+                       (time->hours/string (task-total t))))
+      tasks)
+    (printf "Total: ~a~n"
+            (time->hours/string total-time))))
 
 ; List totals for all categories.
 (when (procedure? (list-ctotals))
-  (printf "category\ttotal~n")
-  (printf "------------------------------------------------~n")
-  (for-each (lambda (t)
-             (printf "~s\t~s~n"
-                     (total-name t)
-                     (time->hours/string (total-time t))))
-    (list-category-totals (list-tasks db (list-ctotals) (current-milliseconds)))))
+  (let* ((tasks (list-tasks db (list-ctotals) (current-milliseconds)))
+          (total (foldl (lambda (t result)
+                          (+ result (task-total t)))
+                         0
+                         tasks)))
+    (for-each (lambda (t)
+                 (let* ((name (total-name t))
+                        (time (total-time t)) 
+                        ; Normalize to 10 bars.
+                        (numbars (round (* (/ time total) 10))))
+                   (printf "~a ~a | ~a>~n"
+                           name
+                           (time->hours/string time)
+                           (print-bars numbars))))
+      (list-category-totals tasks))
+    (printf "Total: ~a~n"
+            (time->hours/string total))))
 
 ; All done, close the database.
 (close-db db)

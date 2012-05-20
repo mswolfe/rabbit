@@ -41,18 +41,25 @@
   ; Returns a string formatted date given the time in milliseconds.
   ;
   ; exact-integer? -> string?
-  (define (time->date/string ms)
+  (define (time->date/string ms [now (current-date)])
     (if (= ms 0)
-        ""
-        (date->string (seconds->date (/ ms 1000)) #t)))
+        "       "
+        (let* ((d (seconds->date (/ ms 1000)))
+               (str (date->string d #t)))
+          (if (and
+               (= (date-year d) (date-year now))
+               (= (date-year-day d) (date-year-day now)))
+            ; Printing a time for today.
+            (substring str 12)
+            ; Past day, print the whole thing.
+            str))))
   
   ; Returns a string formatted date given the time in milliseconds.
   ;
   ; exact-integer? -> string?
   (define (time->hours/string ms)
-    (let ((str (number->string (exact->inexact (/ ms 1000 60 60)))))
+    (let ((str (real->decimal-string (exact->inexact (/ ms 1000 60 60)))))
       (string-append
-        ;(list->string (remove* (member #\. (string->list str)) (string->list str)))
         str
         " hrs")))
   )
