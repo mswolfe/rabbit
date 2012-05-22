@@ -50,7 +50,7 @@
                (= (date-year d) (date-year now))
                (= (date-year-day d) (date-year-day now)))
             ; Printing a time for today.
-            (substring str 12)
+            (string-trim (substring str 11))
             ; Past day, print the whole thing.
             str))))
   
