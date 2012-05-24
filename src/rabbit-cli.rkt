@@ -38,7 +38,7 @@
                         (remove-c category)]
  [("--change-category") old-category new-category
                         "Changes the category name"
-                        (remove-c (list old-category new-category))]
+                        (change-c (list old-category new-category))]
  [("--list-category") "Lists all categories"
                         (list-c #t)]
  
@@ -47,22 +47,16 @@
  [("-e" "--end") "End all currently active tasks."
                  (end-ts #t)]
  [("--end-task") task-id "End the task for the given task id."
-                 (end-t (string->number task-id))]
+                 (end-t task-id)]
  [("-x" "--switch") category "Switch the active task to the given category.  This will stop all active tasks."
                     (switch-t category)]
  [("-r" "--remove") task-id "Removes the task identified by the given task id."
-                    (remove-t (string->number task-id))]
+                    (remove-t task-id)]
  [("-l" "--list") range "List the tasks for a given range (day/week/month)"
-                  (list-ttotals (case range
-                                [("week") week]
-                                [("month") month]
-                                [else day]))]
+                  (list-ttotals range)]
                   
  [("-o" "--overview") range "List the totals for a given time range (day/week/month)"
-                      (list-ctotals (case range
-                                      [("week") week]
-                                      [("month") month]
-                                      [else day]))]
+                      (list-ctotals range)]
  )
 
 (unless (path-string? (db-path))
@@ -83,99 +77,112 @@
       result
       (print-bars (sub1 num-bars) (string-append result "="))))
 
-; Add category
-(when (string? (add-c))
-  (if (add-category db (add-c))
-      (printf "Category '~s' created.~n" (add-c))
-      (printf "Failed to create category '~s'.~n" (add-c))))
-
-; Remove category
-(when (string? (remove-c))
-  (if (remove-category db (remove-c))
-      (printf "Category '~s' removed.~n" (remove-c))
-      (printf "Failed to remove category '~s'.  Is there a task associated with this category?~n" (remove-c))))
-
-; Change category
-(when (list? (change-c))
-  (if (change-category db
-                       (first (change-c))
-                       (second (change-c)))
-      (printf "Category '~s' change to '~s'.~n" (first (change-c)) (second (change-c)))
-      (printf "Failed to change category '~s' to '~s'.~n" (first (change-c)) (second (change-c)))))
-
-; List category
-(when (equal? (list-c) #t)
-  (foldl (lambda (c)
-          (printf "~s~n" (category-name c)))
-   (list-categories db)))
-
-; Begin task
-(when (string? (begin-t))
-  (if (> (begin-task db (begin-t)) 0)
-      (printf "Task started for '~s'.~n" (begin-t))
-      (printf "Failed to start task for '~s'.~n" (begin-t))))
-  
-; End tasks
-(when (equal? (end-ts) #t)
-  (if (end-tasks db)
-      (printf "Ended all active tasks.~n")
-      (printf "Failed to end active tasks.~n")))
-  
-; End a specific task.
-(when (number? (end-t))
-  (if (end-task db (end-t))
-      (printf "Ended task ~a.~n" (end-t))
-      (printf "Failed to end task ~a.~n" (end-t))))
- 
-; Switch to a new task.
-(when (string? (switch-t))
-  (if (> (switch-task db (switch-t)) 0)
-    (printf "Task switched to '~s'.~n" (switch-t))
-    (printf "Failed to switch to task '~s'.~n" (switch-t))))
+(cond
+  ; Add category
+  [(string? (add-c))
+   (if (add-category db (add-c))
+       (printf "Category '~a' created.~n" (add-c))
+       (printf "Failed to create category '~a'.~n" (add-c)))]
+   
+  ; Remove category
+  [(string? (remove-c))
+    (if (remove-category db (remove-c))
+        (printf "Category '~a' removed.~n" (remove-c))
+        (printf "Failed to remove category '~a'.  Is there a task associated with this category?~n" (remove-c)))]
     
-; Remove a task.
-(when (number? (remove-t))
-  (if (remove-task db (remove-t))
-    (printf "Task '~s' removed.~n" (remove-t))
-    (printf "Failed to remove task '~s'.~n" (remove-t))))
+  ; Change category
+  [(list? (change-c))
+    (if (change-category db
+                         (first (change-c))
+                         (second (change-c)))
+        (printf "Category '~a' change to '~a'.~n" (first (change-c)) (second (change-c)))
+        (printf "Failed to change category '~a' to '~a'.~n" (first (change-c)) (second (change-c))))]
 
-; List all tasks.
-(when (procedure? (list-ttotals))
-  (let* ((tasks (list-tasks db (list-ttotals) (current-milliseconds)))
-          (total-time (foldl (lambda (t result)
-                              (+ result (task-total t)))
-                             0
-                             tasks)))
-    (for-each (lambda (t)
-               (printf "[~a] ~a (~a - ~a) ~a~n"
-                       (number->string (task-tid t))
-                       (task-name t)
-                       (time->date/string (task-start t))
-                       (time->date/string (task-stop t))
-                       (time->hours/string (task-total t))))
-      tasks)
-    (printf "Total: ~a~n"
-            (time->hours/string total-time))))
+  ; List category
+  [(equal? (list-c) #t)
+    (for-each (lambda (c)
+                (printf "~a~n" (category-name c)))
+     (list-categories db))]
 
-; List totals for all categories.
-(when (procedure? (list-ctotals))
-  (let* ((tasks (list-tasks db (list-ctotals) (current-milliseconds)))
-          (total (foldl (lambda (t result)
-                          (+ result (task-total t)))
-                         0
-                         tasks)))
-    (for-each (lambda (t)
-                 (let* ((name (total-name t))
-                        (time (total-time t)) 
-                        ; Normalize to 10 bars.
-                        (numbars (round (* (/ time total) 10))))
-                   (printf "~a ~a | ~a>~n"
-                           name
-                           (time->hours/string time)
-                           (print-bars numbars))))
-      (list-category-totals tasks))
-    (printf "Total: ~a~n"
-            (time->hours/string total))))
+  ; Begin task
+  [(string? (begin-t))
+    (if (> (begin-task db (begin-t)) 0)
+        (printf "Task started for '~a'.~n" (begin-t))
+        (printf "Failed to start task for '~a'.~n" (begin-t)))]
+  
+  ; End tasks
+  [(equal? (end-ts) #t)
+    (if (end-tasks db)
+        (printf "Ended all active tasks.~n")
+        (printf "Failed to end active tasks.~n"))]
+  
+  ; End a specific task.
+  [(string? (end-t))
+    (if (end-task db (string->number (end-t)))
+        (printf "Ended task ~a.~n" (end-t))
+        (printf "Failed to end task ~a.~n" (end-t)))]
+ 
+  ; Switch to a new task.
+  [(string? (switch-t))
+    (if (> (switch-task db (switch-t)) 0)
+      (printf "Task switched to '~a'.~n" (switch-t))
+      (printf "Failed to switch to task '~a'.~n" (switch-t)))]
+    
+  ; Remove a task.
+  [(string? (remove-t))
+    (if (remove-task db (string->number (remove-t)))
+      (printf "Task '~a' removed.~n" (remove-t))
+      (printf "Failed to remove task '~a'.~n" (remove-t)))]
+
+  ; List all tasks.
+  [(string? (list-ttotals))
+    (let* ((range (cond
+                     [(string=? (list-ttotals) "day") day]
+                     [(string=? (list-ttotals) "week") week]
+                     [(string=? (list-ttotals) "month") month]
+                     [(string=? (list-ttotals) "year") year]
+                     [else day]))
+            (tasks (list-tasks db range (current-milliseconds)))
+            (total-time (foldl (lambda (t result)
+                                (+ result (task-total t)))
+                               0
+                               tasks)))
+      (for-each (lambda (t)
+                 (printf "[~a] ~a (~a - ~a) ~a~n"
+                         (number->string (task-tid t))
+                         (task-name t)
+                         (time->date/string (task-start t))
+                         (time->date/string (task-stop t))
+                         (time->hours/string (task-total t))))
+        tasks)
+      (printf "Total: ~a~n"
+              (time->hours/string total-time)))]
+
+  ; List totals for all categories.
+  [(string? (list-ctotals))
+    (let* ((range (cond
+                     [(string=? (list-ctotals) "day") day]
+                     [(string=? (list-ctotals) "week") week]
+                     [(string=? (list-ctotals) "month") month]
+                     [(string=? (list-ctotals) "year") year]
+                     [else day]))
+            (tasks (list-tasks db range (current-milliseconds)))
+            (total (foldl (lambda (t result)
+                            (+ result (task-total t)))
+                           0
+                           tasks)))
+      (for-each (lambda (t)
+                   (let* ((name (total-name t))
+                          (time (total-time t)) 
+                          ; Normalize to 10 bars.
+                          (numbars (round (* (/ time total) 10))))
+                     (printf "~a ~a | ~a>~n"
+                             name
+                             (time->hours/string time)
+                             (print-bars numbars))))
+        (list-category-totals tasks))
+      (printf "Total: ~a~n"
+              (time->hours/string total)))])
 
 ; All done, close the database.
 (close-db db)

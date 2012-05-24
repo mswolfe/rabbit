@@ -1,4 +1,4 @@
-rabbit
+Rabbit
 ======
 
 A small category oriented task tracking system.  Yeah, yeah, there's a ton
