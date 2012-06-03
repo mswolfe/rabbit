@@ -115,8 +115,8 @@
   (define UPDATE_TASK_START "update tasks set start = ? where ")
   (define UPDATE_TASK_STOP "update tasks set stop = ? where ")
   
-  ; Updates the given values for the given task id.  Returns true when all three
-  ; updates are taken, false otherwise.
+  ; Updates the given values for the given task id.  Returns true when all 
+  ; specified updates are taken, false otherwise.
   ;
   ; db? exact-integer? exact-integer? exact-integer? exact-integer? -> boolean?
   (define (update-task db
