@@ -26,6 +26,8 @@
 
 (define list-ttotals (make-parameter #f))
 (define list-ctotals (make-parameter #f))
+
+(define version (make-parameter #f))
  
 ; Parse the command line.
 (command-line
@@ -76,7 +78,15 @@
  [("--update-task-category") task-id category "Updates the category for the given task id."
                           (begin (update-t-id task-id)
                                  (update-t-category category))]
+ [("-v" "--version") "Prints the version information."
+                     (version #t)]
+ 
  )
+
+; Print the version info and exit when asked.
+(when (version)
+  (printf "Rabbit ~a~n" +version+)
+  (exit 0))
 
 (unless (path-string? (db-path))
   (printf "You must provide the database path with --database <filename>~n")

@@ -22,7 +22,12 @@
            list-tasks
            
            list-task-totals
-           list-category-totals)
+           list-category-totals
+           
+           +version+)
+
+  ; The version number of racket.
+  (define +version+ "0.0.3")
   
   ; Creates a category with the given name
   ; if the category name doesn't currently
