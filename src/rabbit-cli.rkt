@@ -5,22 +5,26 @@
          "rabbit.rkt"
          "rabbit-db.rkt")
 
-; TODO: Make this path configurable.
+; Command line options.
 (define db-path (make-parameter #f))
 
-; Command line options.
 (define add-c (make-parameter #f))
 (define remove-c (make-parameter #f))
 (define change-c (make-parameter #f))
 (define list-c (make-parameter #f))
 
 (define begin-t (make-parameter #f))
-(define end-t (make-parameter #f))
 (define end-ts (make-parameter #f))
 (define switch-t (make-parameter #f))
-(define remove-t (make-parameter #f))
-(define list-ttotals (make-parameter #f))
 
+(define end-t (make-parameter #f))
+(define remove-t (make-parameter #f))
+(define update-t-id (make-parameter #f))
+(define update-t-start (make-parameter #f))
+(define update-t-stop (make-parameter #f))
+(define update-t-category (make-parameter #f))
+
+(define list-ttotals (make-parameter #f))
 (define list-ctotals (make-parameter #f))
  
 ; Parse the command line.
@@ -30,6 +34,7 @@
  [("--database") filename "Sets the database path that rabbit uses."
                  (db-path filename)]
  #:once-any
+ ; Category manipulation flags.
  [("--add-category") category
                      "Creates a category"
                      (add-c category)]
@@ -42,21 +47,35 @@
  [("--list-category") "Lists all categories"
                         (list-c #t)]
  
+ ; Logical task starting/switching/ending                        
  [("-b" "--begin") category "Begin a task for the given category."
                    (begin-t category)]
  [("-e" "--end") "End all currently active tasks."
                  (end-ts #t)]
- [("--end-task") task-id "End the task for the given task id."
-                 (end-t task-id)]
  [("-x" "--switch") category "Switch the active task to the given category.  This will stop all active tasks."
                     (switch-t category)]
- [("-r" "--remove") task-id "Removes the task identified by the given task id."
-                    (remove-t task-id)]
- [("-l" "--list") range "List the tasks for a given range (day/week/month)"
+ 
+ ; Listing tasks and overviews.
+ [("-l" "--list") range "List the tasks for a given range where range can be the number of days in integer form or one of the following defined constants: day|week|month|year"
                   (list-ttotals range)]
                   
- [("-o" "--overview") range "List the totals for a given time range (day/week/month)"
+ [("-o" "--overview") range "List the totals for a given range where range can be the number of days in integer form or one of the following defined constants: day|week|month|year"
                       (list-ctotals range)]
+ 
+ ; Task manipulations.
+ [("--end-task") task-id "End the task for the given task id."
+                 (end-t task-id)]
+ [("--remove-task") task-id "Removes the task identified by the given task id."
+                    (remove-t task-id)]
+ [("--update-task-start") task-id start "Updates the starting time for the given task id."
+                          (begin (update-t-id task-id)
+                                 (update-t-start start))]
+ [("--update-task-stop") task-id stop "Updates the stop time for the given task id."
+                          (begin (update-t-id task-id)
+                                 (update-t-stop stop))]
+ [("--update-task-category") task-id category "Updates the category for the given task id."
+                          (begin (update-t-id task-id)
+                                 (update-t-category category))]
  )
 
 (unless (path-string? (db-path))
@@ -66,9 +85,6 @@
 ; Past the command line parser, let's setup the db.
 (define db (open-db (db-path)))
 
-; Setup the date display formatting.
-(date-display-format 'iso-8601)
-
 ; Returns a string with the given number of bars.
 ;
 ; exact-integer? -> string?
@@ -76,6 +92,27 @@
   (if (<= num-bars 0)
       result
       (print-bars (sub1 num-bars) (string-append result "="))))
+
+; Returns the procedure or start time to search upon.
+;
+; string? -> (or procedure? exact-integer?)
+(define (find-range str)
+  (cond
+   [(string=? str "day") day]
+   [(string=? str "week") week]
+   [(string=? str "month") month]
+   [(string=? str "year") year]
+   [else
+     (with-handlers ([(lambda (e) (exn:fail? e))
+                      (lambda (e) day)])
+       (let* ((now (current-date))
+              (num (string->number str))
+              (time (+ 
+                      (* (date-hour now) 60 60 1000)
+                      (* (date-minute now) 60 1000)
+                      (* (date-second now) 1000)
+                      (* (- num 1) 24 60 60 1000))))
+         (- (current-milliseconds) time)))]))
 
 (cond
   ; Add category
@@ -115,12 +152,6 @@
     (if (end-tasks db)
         (printf "Ended all active tasks.~n")
         (printf "Failed to end active tasks.~n"))]
-  
-  ; End a specific task.
-  [(string? (end-t))
-    (if (end-task db (string->number (end-t)))
-        (printf "Ended task ~a.~n" (end-t))
-        (printf "Failed to end task ~a.~n" (end-t)))]
  
   ; Switch to a new task.
   [(string? (switch-t))
@@ -128,22 +159,53 @@
       (printf "Task switched to '~a'.~n" (switch-t))
       (printf "Failed to switch to task '~a'.~n" (switch-t)))]
     
+  ; End a specific task.
+  [(string? (end-t))
+    (if (end-task db (string->number (end-t)))
+        (printf "Ended task ~a.~n" (end-t))
+        (printf "Failed to end task ~a.~n" (end-t)))]
+    
   ; Remove a task.
   [(string? (remove-t))
     (if (remove-task db (string->number (remove-t)))
       (printf "Task '~a' removed.~n" (remove-t))
       (printf "Failed to remove task '~a'.~n" (remove-t)))]
+    
+  ; Update a task start time.
+  [(and (string? (update-t-id))
+        (string? (update-t-start)))
+   (if (update-task db
+                    (string->number (update-t-id))
+                    #:start (date/string->time (update-t-start)))
+       (printf "Updated start time for task id '~a'.~n" (update-t-id))
+       (printf "Failed to update start time for task id '~a'.~n" (update-t-id)))]
+                    
+  ; Update a task stop time.
+  [(and (string? (update-t-id))
+        (string? (update-t-stop)))
+   (if (update-task db
+                    (string->number (update-t-id))
+                    #:stop (date/string->time (update-t-stop)))
+       (printf "Updated stop time for task id '~a'.~n" (update-t-id))
+       (printf "Failed to update stop time for task id '~a'.~n" (update-t-id)))]
+      
+  ; Update a task category.
+  [(and (string? (update-t-id))
+        (string? (update-t-category)))
+   (let ((cid (select-category-id db (update-t-category))))
+     (if (= cid -1)
+         (printf "Failed to find the given category!  Update failed.")
+         (if (update-task db
+                          (string->number (update-t-id))
+                          #:cid cid)
+             (printf "Updated category for task id '~a'.~n" (update-t-id))
+             (printf "Failed to category for task id '~a'.~n" (update-t-id)))))]
 
   ; List all tasks.
   [(string? (list-ttotals))
-    (let* ((range (cond
-                     [(string=? (list-ttotals) "day") day]
-                     [(string=? (list-ttotals) "week") week]
-                     [(string=? (list-ttotals) "month") month]
-                     [(string=? (list-ttotals) "year") year]
-                     [else day]))
-            (tasks (list-tasks db range (current-milliseconds)))
-            (total-time (foldl (lambda (t result)
+    (let* ((range (find-range (list-ttotals)))
+           (tasks (list-tasks db range (current-milliseconds)))
+           (total-time (foldl (lambda (t result)
                                 (+ result (task-total t)))
                                0
                                tasks)))
@@ -160,14 +222,9 @@
 
   ; List totals for all categories.
   [(string? (list-ctotals))
-    (let* ((range (cond
-                     [(string=? (list-ctotals) "day") day]
-                     [(string=? (list-ctotals) "week") week]
-                     [(string=? (list-ctotals) "month") month]
-                     [(string=? (list-ctotals) "year") year]
-                     [else day]))
-            (tasks (list-tasks db range (current-milliseconds)))
-            (total (foldl (lambda (t result)
+    (let* ((range (find-range (list-ctotals)))
+           (tasks (list-tasks db range (current-milliseconds)))
+           (total (foldl (lambda (t result)
                             (+ result (task-total t)))
                            0
                            tasks)))
