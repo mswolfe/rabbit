@@ -156,7 +156,9 @@
   ; void -> exact-integer?
   (define (week [now (current-date)])
     (let ((time (+
-                 (day now)
+                 (* (date-hour now) 60 60 1000)
+                 (* (date-minute now) 60 1000)
+                 (* (date-second now) 1000)
                  (* (date-week-day now) 24 60 60 1000))))
       (- (current-milliseconds) time)))
   
@@ -166,8 +168,10 @@
   ; void -> exact-integer?
   (define (month [now (current-date)])
      (let ((time (+
-                   (day now)
-                   (* (date-day now) 24 60 60 1000))))
+                  (* (date-hour now) 60 60 1000)
+                  (* (date-minute now) 60 1000)
+                  (* (date-second now) 1000)
+                  (* (date-day now) 24 60 60 1000))))
        (- (current-milliseconds) time)))
   
   ; Returns the amount of time in ms that has occured
@@ -176,8 +180,10 @@
   ; void -> exact-integer?
   (define (year [now (current-date)])
      (let ((time (+
-                   (day now)
-                   (* (date-year-day now) 24 60 60 1000))))
+                  (* (date-hour now) 60 60 1000)
+                  (* (date-minute now) 60 1000)
+                  (* (date-second now) 1000)
+                  (* (date-year-day now) 24 60 60 1000))))
        (- (current-milliseconds) time)))
   
   ; Returns all tasks that lie between the given start and stop time and
